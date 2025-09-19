@@ -57,6 +57,31 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // Satellite theme colors
+        satellite: {
+          deep: "hsl(var(--satellite-deep))",
+          medium: "hsl(var(--satellite-medium))",
+          light: "hsl(var(--satellite-light))",
+        },
+        earth: {
+          blue: "hsl(var(--earth-blue))",
+          cyan: "hsl(var(--earth-cyan))",
+          green: "hsl(var(--earth-green))",
+        },
+      },
+      backgroundImage: {
+        "gradient-space": "var(--gradient-space)",
+        "gradient-earth": "var(--gradient-earth)",
+        "gradient-subtle": "var(--gradient-subtle)",
+      },
+      boxShadow: {
+        "card": "var(--shadow-card)",
+        "hover": "var(--shadow-hover)",
+        "glow": "var(--shadow-glow)",
+      },
+      transitionTimingFunction: {
+        "smooth": "var(--transition-smooth)",
+        "bounce": "var(--transition-bounce)",
       },
       borderRadius: {
         lg: "var(--radius)",
