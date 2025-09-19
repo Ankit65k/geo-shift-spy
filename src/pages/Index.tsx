@@ -7,7 +7,7 @@ import { ComparisonResults } from '@/components/ComparisonResults';
 import { LoadingState } from '@/components/LoadingState';
 import { compareImages, type CompareImagesResponse } from '@/services/api';
 import { useToast } from '@/hooks/use-toast';
-import satelliteHero from '@/assets/satellite-hero.jpg';
+import { HeroGeometric } from '@/components/ui/shape-landing-hero';
 
 const Index = () => {
   const [beforeImage, setBeforeImage] = useState<File | null>(null);
@@ -59,30 +59,11 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-gradient-subtle">
       {/* Hero Section */}
-      <div className="relative overflow-hidden">
-        <div 
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{ backgroundImage: `url(${satelliteHero})` }}
-        >
-          <div className="absolute inset-0 bg-satellite-deep/60"></div>
-        </div>
-        <div className="relative z-10 container mx-auto px-4 py-20">
-          <div className="text-center text-white">
-            <div className="flex justify-center mb-6">
-              <div className="w-16 h-16 rounded-full bg-gradient-earth flex items-center justify-center">
-                <Satellite className="h-8 w-8 text-white" />
-              </div>
-            </div>
-            <h1 className="text-4xl md:text-6xl font-bold mb-4">
-              Satellite Image Change Detector
-            </h1>
-            <p className="text-xl md:text-2xl text-white/90 max-w-3xl mx-auto leading-relaxed">
-              Advanced AI-powered analysis to detect and quantify changes in satellite imagery. 
-              Compare before and after images to identify environmental, urban, or natural changes.
-            </p>
-          </div>
-        </div>
-      </div>
+      <HeroGeometric 
+        badge="AI-Powered Analysis"
+        title1="Satellite Image"
+        title2="Change Detector"
+      />
 
       {/* Features Section */}
       <div className="container mx-auto px-4 py-16">
