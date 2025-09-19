@@ -38,7 +38,26 @@ fs.ensureDirSync(path.join(__dirname, '../uploads'));
 
 // Middleware configuration
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:5173', 'http://0.0.0.0:8080', 'https://*.replit.app', 'https://*.replit.dev'],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Define allowed origins
+    const allowedOrigins = [
+      'http://localhost:8080',
+      'http://localhost:5173', 
+      'http://0.0.0.0:8080'
+    ];
+    
+    // Check for Replit domains with regex
+    const replitRegex = /^https:\/\/.*\.replit\.(app|dev)$/;
+    
+    if (allowedOrigins.includes(origin) || replitRegex.test(origin)) {
+      return callback(null, true);
+    }
+    
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 
@@ -193,9 +212,9 @@ async function analyzeChangesWithAI(beforeImagePath, afterImagePath, changePerce
     const beforeImageBase64 = await fs.readFile(beforeImagePath, { encoding: 'base64' });
     const afterImageBase64 = await fs.readFile(afterImagePath, { encoding: 'base64' });
     
-    // Use OpenAI GPT-5 with vision capabilities to analyze the changes
+    // Use OpenAI GPT-4O with vision capabilities to analyze the changes
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025
+      model: "gpt-4o", // Using supported OpenAI vision model
       messages: [
         {
           role: "system",
@@ -229,7 +248,7 @@ async function analyzeChangesWithAI(beforeImagePath, afterImagePath, changePerce
         }
       ],
       response_format: { type: "json_object" },
-      max_completion_tokens: 500
+      max_tokens: 500
     });
 
     const analysis = JSON.parse(response.choices[0].message.content);
@@ -258,6 +277,9 @@ app.post('/compare', upload.fields([
   { name: 'before_image', maxCount: 1 },
   { name: 'after_image', maxCount: 1 }
 ]), async (req, res) => {
+  let beforeImageFile = null;
+  let afterImageFile = null;
+  
   try {
     // Validate uploaded files
     if (!req.files || !req.files.before_image || !req.files.after_image) {
@@ -267,8 +289,8 @@ app.post('/compare', upload.fields([
       });
     }
 
-    const beforeImageFile = req.files.before_image[0];
-    const afterImageFile = req.files.after_image[0];
+    beforeImageFile = req.files.before_image[0];
+    afterImageFile = req.files.after_image[0];
     
     console.log(`Processing comparison: ${beforeImageFile.filename} vs ${afterImageFile.filename}`);
     
@@ -315,9 +337,25 @@ app.post('/compare', upload.fields([
     
     res.status(500).json({
       error: 'Internal server error during image comparison',
-      message: error.message,
+      message: 'An error occurred while processing the images',
       success: false
     });
+  } finally {
+    // Clean up uploaded files
+    if (beforeImageFile && beforeImageFile.path) {
+      try {
+        await fs.remove(beforeImageFile.path);
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup before image file:', cleanupError);
+      }
+    }
+    if (afterImageFile && afterImageFile.path) {
+      try {
+        await fs.remove(afterImageFile.path);
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup after image file:', cleanupError);
+      }
+    }
   }
 });
 
