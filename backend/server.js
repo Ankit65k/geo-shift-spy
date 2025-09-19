@@ -2,18 +2,22 @@
 // Author: Replit AI Agent
 // Description: AI-powered satellite image change detection with LLM analysis
 
+import dotenv from 'dotenv';
+// Load environment variables from .env file
+dotenv.config();
+
 import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
-import { createRequire } from 'module';
 import sharp from 'sharp';
 import OpenAI from 'openai';
 import { fileURLToPath } from 'url';
-
-// Handle CommonJS modules in ES module context
+import { createRequire } from 'module';
+import EnvironmentalAnalyst from './environmental-analyst.js';
+// Handle CommonJS modules in ES module context  
 const require = createRequire(import.meta.url);
 const Jimp = require('jimp');
 
@@ -33,6 +37,9 @@ if (process.env.OPENAI_API_KEY) {
   });
 }
 
+// Initialize Environmental Analyst
+const environmentalAnalyst = new EnvironmentalAnalyst(openai);
+
 // Ensure uploads directory exists
 fs.ensureDirSync(path.join(__dirname, '../uploads'));
 
@@ -45,6 +52,7 @@ app.use(cors({
     // Define allowed origins
     const allowedOrigins = [
       'http://localhost:8080',
+      'http://localhost:8081',
       'http://localhost:5173', 
       'http://0.0.0.0:8080'
     ];
@@ -75,17 +83,67 @@ const storage = multer.diskStorage({
   }
 });
 
+// Enhanced image validation function
+function validateSatelliteImage(file) {
+  const validMimeTypes = [
+    'image/jpeg',
+    'image/jpg', 
+    'image/png',
+    'image/tiff',
+    'image/tif',
+    'image/bmp',
+    'image/webp'
+  ];
+  
+  // Check MIME type
+  if (!validMimeTypes.includes(file.mimetype.toLowerCase())) {
+    return {
+      isValid: false,
+      error: `Invalid image format. Please upload satellite images in JPEG, PNG, TIFF, BMP, or WebP format. Received: ${file.mimetype}`
+    };
+  }
+  
+  // Check file size (10MB limit)
+  const maxSize = 10 * 1024 * 1024;
+  if (file.size > maxSize) {
+    return {
+      isValid: false,
+      error: `File size too large. Maximum allowed: 10MB, received: ${(file.size / 1024 / 1024).toFixed(2)}MB`
+    };
+  }
+  
+  // Check minimum file size (1KB to avoid empty files)
+  const minSize = 1024;
+  if (file.size < minSize) {
+    return {
+      isValid: false,
+      error: `File size too small. This doesn't appear to be a valid image file.`
+    };
+  }
+  
+  // Basic filename validation
+  const validExtensions = /\.(jpe?g|png|tiff?|bmp|webp)$/i;
+  if (!validExtensions.test(file.originalname)) {
+    return {
+      isValid: false,
+      error: `Invalid file extension. Please use: .jpg, .jpeg, .png, .tiff, .tif, .bmp, or .webp`
+    };
+  }
+  
+  return { isValid: true };
+}
+
 const upload = multer({
   storage: storage,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Accept only image files
-    if (file.mimetype.startsWith('image/')) {
+    const validation = validateSatelliteImage(file);
+    if (validation.isValid) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed!'), false);
+      cb(new Error(validation.error), false);
     }
   }
 });
@@ -98,21 +156,113 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     endpoints: {
       compare: 'POST /compare - Upload two images for change detection',
+      'sample-analysis': 'GET /sample-analysis - Generate sample environmental report',
       health: 'GET / - Health check'
     }
   });
 });
 
+// Sample Environmental Analysis endpoint for testing
+app.get('/sample-analysis', async (req, res) => {
+  try {
+    // Generate sample data for demonstration
+    const sampleData = {
+      beforeImagePath: 'sample_before.jpg',
+      afterImagePath: 'sample_after.jpg', 
+      changePercentage: parseFloat(req.query.change_percentage) || 23.5,
+      heatmapBase64: 'sample_heatmap_data',
+      aiAnalysis: {
+        summary: 'Significant deforestation detected in satellite imagery',
+        changeType: 'Deforestation',
+        riskScore: 8,
+        details: 'Forest cover reduced by approximately 23.5% with visible clearing patterns'
+      },
+      timestamps: ['2023-01-01', '2023-12-31'],
+      location: req.query.location || 'Amazon Rainforest, Brazil'
+    };
+
+    console.log('🧪 Generating sample environmental analysis...');
+    const environmentalReport = await environmentalAnalyst.generateEnvironmentalReport(sampleData);
+    
+    res.json({
+      success: true,
+      message: 'Sample environmental analysis generated successfully',
+      sample_data: sampleData,
+      environmental_report: environmentalReport,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error generating sample analysis:', error);
+    res.status(500).json({
+      error: 'Failed to generate sample analysis',
+      message: error.message,
+      success: false
+    });
+  }
+});
+
+// Validate image after loading
+async function validateLoadedImage(imagePath, imageFile) {
+  try {
+    const image = await Jimp.read(imagePath);
+    
+    // Check image dimensions
+    const width = image.getWidth();
+    const height = image.getHeight();
+    
+    if (width < 50 || height < 50) {
+      throw new Error(`Image dimensions too small: ${width}x${height}. Please upload images with minimum 50x50 pixels for accurate analysis.`);
+    }
+    
+    if (width > 10000 || height > 10000) {
+      throw new Error(`Image dimensions too large: ${width}x${height}. Please upload images smaller than 10000x10000 pixels.`);
+    }
+    
+    // Check if image appears to be corrupted
+    if (width * height < 2500) { // Less than 50x50 pixels worth of data
+      throw new Error('Image appears to be corrupted or invalid. Please upload a valid satellite image.');
+    }
+    
+    return image;
+  } catch (error) {
+    if (error.message.includes('Could not find MIME for Buffer') || 
+        error.message.includes('Unsupported MIME type')) {
+      throw new Error('Invalid or corrupted image file. Please upload a valid satellite image in JPEG, PNG, TIFF, BMP, or WebP format.');
+    }
+    throw error;
+  }
+}
+
 // Advanced image comparison using computer vision techniques
 async function calculateChangePercentage(beforeImagePath, afterImagePath) {
   try {
-    // Load images using Jimp for processing
-    const beforeImage = await Jimp.read(beforeImagePath);
-    const afterImage = await Jimp.read(afterImagePath);
+    console.log('Loading and validating images...');
+    
+    // Load and validate images using Jimp for processing
+    const beforeImage = await validateLoadedImage(beforeImagePath, 'before');
+    const afterImage = await validateLoadedImage(afterImagePath, 'after');
+    
+    console.log(`Before image: ${beforeImage.getWidth()}x${beforeImage.getHeight()}`);
+    console.log(`After image: ${afterImage.getWidth()}x${afterImage.getHeight()}`);
+    
+    // Check if images have reasonable dimensions for comparison
+    const beforeWidth = beforeImage.getWidth();
+    const beforeHeight = beforeImage.getHeight();
+    const afterWidth = afterImage.getWidth();
+    const afterHeight = afterImage.getHeight();
+    
+    const aspectRatioBefore = beforeWidth / beforeHeight;
+    const aspectRatioAfter = afterWidth / afterHeight;
+    
+    // Check if aspect ratios are reasonably similar (within 50% difference)
+    if (Math.abs(aspectRatioBefore - aspectRatioAfter) / aspectRatioBefore > 0.5) {
+      console.warn('Warning: Images have significantly different aspect ratios. This may affect comparison accuracy.');
+    }
     
     // Resize images to same dimensions for comparison
-    const width = Math.min(beforeImage.getWidth(), afterImage.getWidth());
-    const height = Math.min(beforeImage.getHeight(), afterImage.getHeight());
+    const width = Math.min(beforeWidth, afterWidth);
+    const height = Math.min(beforeHeight, afterHeight);
     
     beforeImage.resize(width, height);
     afterImage.resize(width, height);
@@ -142,8 +292,10 @@ async function calculateChangePercentage(beforeImagePath, afterImagePath) {
     
     return (changedPixels / totalPixels) * 100;
   } catch (error) {
-    console.error('Error calculating change percentage:', error);
-    throw new Error('Failed to process images for change detection');
+    console.error('Error calculating change percentage:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Paths - before:', beforeImagePath, 'after:', afterImagePath);
+    throw new Error('Failed to process images for change detection: ' + error.message);
   }
 }
 
@@ -196,7 +348,71 @@ async function generateHeatmap(beforeImagePath, afterImagePath) {
   }
 }
 
-// AI-powered change analysis using OpenAI GPT-5
+// AI-powered satellite image validation
+async function validateSatelliteImageWithAI(imagePath, imageType = 'unknown') {
+  try {
+    if (!openai || !process.env.OPENAI_API_KEY) {
+      console.warn('OpenAI API key not provided, skipping AI validation');
+      return { isValid: true, confidence: 0.5, reason: 'AI validation not available' };
+    }
+
+    const imageBase64 = await fs.readFile(imagePath, { encoding: 'base64' });
+    
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert satellite image analyst. Your job is to determine if an uploaded image is actually a satellite or aerial image suitable for change detection analysis. 
+          
+          Analyze the image and respond with JSON in this exact format:
+          {
+            "isSatelliteImage": true/false,
+            "confidence": 0.0-1.0,
+            "imageType": "satellite/aerial/street-level/portrait/document/graphic/other",
+            "reason": "detailed explanation of why this is or isn't a satellite image",
+            "suitableForAnalysis": true/false,
+            "recommendations": "specific suggestions if image is not suitable"
+          }
+          
+          Look for: overhead/bird's eye view, landscape features, terrain, buildings from above, satellite image characteristics, proper resolution for analysis.
+          Reject: photos of people, street-level photos, documents, screenshots, graphics, logos, non-geographic imagery.`
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Please analyze this ${imageType} image and determine if it's suitable for satellite change detection analysis. Be strict in your evaluation.`
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${imageBase64}`
+              }
+            }
+          ]
+        }
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 500
+    });
+
+    const validation = JSON.parse(response.choices[0].message.content);
+    return {
+      isValid: validation.isSatelliteImage && validation.suitableForAnalysis,
+      confidence: validation.confidence,
+      reason: validation.reason,
+      imageType: validation.imageType,
+      recommendations: validation.recommendations
+    };
+  } catch (error) {
+    console.error('Error in AI image validation:', error);
+    return { isValid: true, confidence: 0.3, reason: 'AI validation failed, proceeding with caution' };
+  }
+}
+
+// AI-powered change analysis using OpenAI GPT-4o
 async function analyzeChangesWithAI(beforeImagePath, afterImagePath, changePercentage) {
   try {
     if (!openai || !process.env.OPENAI_API_KEY) {
@@ -214,41 +430,60 @@ async function analyzeChangesWithAI(beforeImagePath, afterImagePath, changePerce
     
     // Use OpenAI GPT-4O with vision capabilities to analyze the changes
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Using supported OpenAI vision model
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert satellite image analyst. Analyze these before/after satellite images and provide insights about the changes detected. Focus on identifying:
-          1. Type of changes (deforestation, construction, natural disasters, etc.)
-          2. Environmental or urban impact
-          3. Risk assessment (1-10 scale)
+          content: `You are an expert satellite image analyst specializing in change detection. Analyze these before/after images and provide detailed, specific insights about the actual changes you observe.
           
-          Respond with JSON in this format: { "summary": "brief description", "changeType": "category", "riskScore": number, "details": "detailed analysis" }`
+          Be very specific about what you see. Don't provide generic responses. Look for:
+          1. Land use changes (deforestation, urbanization, agriculture)
+          2. Natural phenomena (flooding, drought, seasonal changes)
+          3. Infrastructure development (roads, buildings, construction)
+          4. Environmental changes (vegetation loss/gain, water body changes)
+          5. Disaster impacts (fire damage, flooding, landslides)
+          
+          Provide a detailed analysis based on what you actually observe, not generic templates.
+          
+          Respond with JSON in this exact format:
+          {
+            "summary": "Specific description of what you observe in these images",
+            "changeType": "Specific category based on actual visual analysis",
+            "riskScore": 1-10 based on severity of observed changes,
+            "details": "Detailed analysis of specific features, locations, and changes you can identify",
+            "specificObservations": ["List specific things you notice"],
+            "confidence": 0.0-1.0 confidence in your analysis,
+            "geographicFeatures": "Description of terrain, vegetation, structures visible",
+            "changeIntensity": "Description of how dramatic the changes are",
+            "possibleCauses": ["Likely causes of the observed changes"]
+          }`
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: `Analyze these satellite images. The automated system detected ${changePercentage.toFixed(2)}% change between the images. What kind of changes do you see?`
+              text: `Analyze these satellite images carefully. The automated system detected ${changePercentage.toFixed(2)}% pixel change between the images. Please provide a detailed analysis of what you actually observe in these specific images, not a generic response. What specific changes do you see? What type of landscape is this? What features are visible?`
             },
             {
               type: "image_url",
               image_url: {
-                url: `data:image/jpeg;base64,${beforeImageBase64}`
+                url: `data:image/jpeg;base64,${beforeImageBase64}`,
+                detail: "high"
               }
             },
             {
               type: "image_url", 
               image_url: {
-                url: `data:image/jpeg;base64,${afterImageBase64}`
+                url: `data:image/jpeg;base64,${afterImageBase64}`,
+                detail: "high"
               }
             }
           ]
         }
       ],
       response_format: { type: "json_object" },
-      max_tokens: 500
+      max_tokens: 800
     });
 
     const analysis = JSON.parse(response.choices[0].message.content);
@@ -257,7 +492,12 @@ async function analyzeChangesWithAI(beforeImagePath, afterImagePath, changePerce
       summary: analysis.summary || `${changePercentage.toFixed(2)}% change detected`,
       changeType: analysis.changeType || 'Unknown Change',
       riskScore: Math.min(10, Math.max(1, analysis.riskScore || Math.round(changePercentage / 10))),
-      details: analysis.details || 'Detailed analysis not available'
+      details: analysis.details || 'Detailed analysis not available',
+      specificObservations: analysis.specificObservations || [],
+      confidence: analysis.confidence || 0.7,
+      geographicFeatures: analysis.geographicFeatures || 'Geographic features not identified',
+      changeIntensity: analysis.changeIntensity || 'Change intensity not assessed',
+      possibleCauses: analysis.possibleCauses || ['Cause analysis not available']
     };
     
   } catch (error) {
@@ -294,38 +534,94 @@ app.post('/compare', upload.fields([
     
     console.log(`Processing comparison: ${beforeImageFile.filename} vs ${afterImageFile.filename}`);
     
-    // Step 1: Calculate change percentage using computer vision
+    // Step 1: AI-powered image validation
+    console.log('Validating images with AI...');
+    const beforeValidation = await validateSatelliteImageWithAI(beforeImageFile.path, 'before');
+    const afterValidation = await validateSatelliteImageWithAI(afterImageFile.path, 'after');
+    
+    if (!beforeValidation.isValid) {
+      throw new Error(`Before image is not suitable for satellite analysis: ${beforeValidation.reason}. ${beforeValidation.recommendations}`);
+    }
+    
+    if (!afterValidation.isValid) {
+      throw new Error(`After image is not suitable for satellite analysis: ${afterValidation.reason}. ${afterValidation.recommendations}`);
+    }
+    
+    if (beforeValidation.confidence < 0.6 || afterValidation.confidence < 0.6) {
+      console.warn('Low confidence in image validation, proceeding with caution');
+    }
+    
+    // Step 2: Calculate change percentage using computer vision
+    console.log('Calculating change percentage...');
     const changePercentage = await calculateChangePercentage(
       beforeImageFile.path,
       afterImageFile.path
     );
     
-    // Step 2: Generate heatmap visualization
+    // Step 3: Generate heatmap visualization
+    console.log('Generating change heatmap...');
     const heatmapBase64 = await generateHeatmap(
       beforeImageFile.path,
       afterImageFile.path
     );
     
-    // Step 3: AI-powered analysis (if OpenAI key is available)
+    // Step 4: AI-powered change analysis (if OpenAI key is available)
+    console.log('Performing AI-powered change analysis...');
     const aiAnalysis = await analyzeChangesWithAI(
       beforeImageFile.path,
       afterImageFile.path,
       changePercentage
     );
     
-    // Prepare response
+    // Step 5: Generate comprehensive environmental analysis
+    console.log('Generating environmental report...');
+    const environmentalReport = await environmentalAnalyst.generateEnvironmentalReport({
+      beforeImagePath: beforeImageFile.path,
+      afterImagePath: afterImageFile.path,
+      changePercentage: changePercentage,
+      heatmapBase64: heatmapBase64,
+      aiAnalysis: aiAnalysis,
+      timestamps: null, // Could be extracted from EXIF data in future
+      location: req.body.location || `Analysis Site (${new Date().toLocaleDateString()})`,
+      imageValidation: {
+        beforeImage: beforeValidation,
+        afterImage: afterValidation
+      }
+    });
+    
+    // Prepare enhanced response
     const response = {
       success: true,
       change_percentage: parseFloat(changePercentage.toFixed(2)),
       heatmap_url: `data:image/png;base64,${heatmapBase64}`,
       ai_analysis: aiAnalysis,
-      message: `Analysis complete: ${aiAnalysis.summary}`,
+      environmental_report: environmentalReport,
+      message: `Environmental analysis complete: ${environmentalReport.executiveSummary.substring(0, 100)}...`,
+      validation: {
+        beforeImage: {
+          isValid: beforeValidation.isValid,
+          confidence: beforeValidation.confidence,
+          imageType: beforeValidation.imageType,
+          reason: beforeValidation.reason
+        },
+        afterImage: {
+          isValid: afterValidation.isValid,
+          confidence: afterValidation.confidence,
+          imageType: afterValidation.imageType,
+          reason: afterValidation.reason
+        }
+      },
       metadata: {
         before_image: beforeImageFile.filename,
         after_image: afterImageFile.filename,
         processed_at: new Date().toISOString(),
         change_type: aiAnalysis.changeType,
-        risk_score: aiAnalysis.riskScore
+        risk_score: aiAnalysis.riskScore,
+        severity: environmentalReport.analysis?.severity || 'UNKNOWN',
+        urgency: environmentalReport.analysis?.urgencyLevel || 'MEDIUM',
+        ai_confidence: aiAnalysis.confidence || 0.7,
+        geographic_features: aiAnalysis.geographicFeatures,
+        change_intensity: aiAnalysis.changeIntensity
       }
     };
     
@@ -333,12 +629,42 @@ app.post('/compare', upload.fields([
     res.json(response);
     
   } catch (error) {
-    console.error('Error in /compare endpoint:', error);
+    console.error('Error in /compare endpoint:', error.message);
+    console.error('Full error stack:', error.stack);
     
-    res.status(500).json({
-      error: 'Internal server error during image comparison',
-      message: 'An error occurred while processing the images',
-      success: false
+    // Provide specific error messages for different types of failures
+    let statusCode = 500;
+    let errorType = 'Internal Server Error';
+    let userMessage = error.message;
+    
+    if (error.message.includes('Invalid or corrupted image') ||
+        error.message.includes('dimensions too small') ||
+        error.message.includes('dimensions too large') ||
+        error.message.includes('appears to be corrupted')) {
+      statusCode = 400;
+      errorType = 'Invalid Image';
+    } else if (error.message.includes('Could not find MIME') ||
+               error.message.includes('Unsupported MIME type')) {
+      statusCode = 400;
+      errorType = 'Unsupported File Format';
+      userMessage = 'Please upload satellite images in JPEG, PNG, TIFF, BMP, or WebP format.';
+    } else if (error.message.includes('Failed to process images')) {
+      statusCode = 422;
+      errorType = 'Processing Error';
+      userMessage = 'Unable to process the uploaded images. Please ensure they are valid satellite images.';
+    }
+    
+    res.status(statusCode).json({
+      error: errorType,
+      message: userMessage,
+      success: false,
+      suggestions: [
+        'Ensure images are in JPEG, PNG, TIFF, BMP, or WebP format',
+        'Check that images are not corrupted',
+        'Verify images are satellite/aerial imagery',
+        'Ensure file sizes are between 1KB and 10MB',
+        'Try using images with similar dimensions and aspect ratios'
+      ]
     });
   } finally {
     // Clean up uploaded files

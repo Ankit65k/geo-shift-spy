@@ -39,6 +39,7 @@ setTimeout(() => {
   const frontend = spawn('npm', ['run', 'dev'], {
     cwd: __dirname,
     stdio: 'inherit',
+    shell: true,
     env: { ...process.env }
   });
   
