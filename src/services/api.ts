@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // Enhanced interfaces for comprehensive environmental analysis
 export interface ZonalAnalysis {
@@ -150,8 +150,8 @@ export interface ImageValidation {
 }
 
 export interface CompareImagesResponse {
-  success: boolean;
-  change_percentage: number;
+  success?: boolean;
+  change_percentage?: number;
   heatmap_url?: string;
   message?: string;
   ai_analysis?: {
@@ -182,6 +182,91 @@ export interface CompareImagesResponse {
     geographic_features?: string;
     change_intensity?: string;
   };
+  // Enhanced response format
+  analysis_id?: string;
+  timestamp?: string;
+  processing_info?: {
+    model_used: string;
+    dataset_integration: string;
+    processing_time_seconds: number;
+    resolution: string;
+    confidence_enhancement?: string;
+  };
+  overall_assessment?: {
+    total_area_analyzed_sq_km: number;
+    total_area_changed_sq_km: number;
+    change_percentage: number;
+    overall_severity: string;
+    confidence_score: number;
+    urgency_level: string;
+  };
+  detected_changes?: Array<{
+    type: string;
+    severity: string;
+    area_percentage: number;
+    area_sq_km: number;
+    confidence: number;
+    coordinates?: any;
+    environmental_impact?: Record<string, any>;
+  }>;
+  environmental_summary?: {
+    primary_concerns: string[];
+    ecological_zones_affected: number;
+    estimated_recovery_time: string;
+    monitoring_recommendations: string[];
+    immediate_actions_required: string[];
+  };
+  geographic_context?: {
+    coordinate_system: string;
+    analysis_bounds: any;
+    terrain_type: string;
+    climate_zone: string;
+    land_use_classification: any[];
+  };
+  data_quality?: {
+    cloud_coverage_percent: number;
+    atmospheric_conditions: string;
+    image_quality_score: number;
+    temporal_gap_days: number;
+  };
+  executive_summary?: {
+    main_finding?: string;
+    specific_observations?: string;
+    geographic_features?: string;
+    possible_causes?: string;
+    zone_analysis?: string;
+    temporal_analysis?: string;
+    urgency_assessment?: string;
+  };
+  ai_insights?: Array<{
+    type: string;
+    confidence: number;
+    insight: string;
+    technical_details: string;
+  }>;
+  interactive_components?: {
+    clickable_zones?: any;
+    actionable_items?: any;
+    data_visualization?: any;
+  };
+  input_files?: {
+    before_image: {
+      filename: string;
+      size_kb: number;
+      upload_time: string;
+    };
+    after_image: {
+      filename: string;
+      size_kb: number;
+      upload_time: string;
+    };
+  };
+  verification_suggestions?: Array<{
+    change_type: string;
+    verification_sources: string[];
+    confidence_level: number;
+    recommended_action: string;
+  }>;
 }
 
 export interface CompareImagesRequest {
@@ -191,11 +276,15 @@ export interface CompareImagesRequest {
 
 export const compareImages = async (
   beforeImage: File,
-  afterImage: File
+  afterImage: File,
+  locationHint?: string
 ): Promise<CompareImagesResponse> => {
   const formData = new FormData();
-  formData.append('before_image', beforeImage);
-  formData.append('after_image', afterImage);
+  formData.append('beforeImage', beforeImage);
+  formData.append('afterImage', afterImage);
+  if (locationHint) {
+    formData.append('locationHint', locationHint);
+  }
 
   const response = await fetch(`${API_URL}/compare`, {
     method: 'POST',
@@ -221,5 +310,15 @@ export const compareImages = async (
     throw new Error(errorMessage);
   }
 
-  return response.json();
+  const basicResponse = await response.json();
+  
+  // Apply intelligent analysis for enhanced results
+  try {
+    const { intelligentAnalysis } = await import('./intelligentAnalysisService.js');
+    const enhancedResponse = await intelligentAnalysis.generateIntelligentAnalysis(basicResponse, locationHint);
+    return enhancedResponse;
+  } catch (intelligentError) {
+    console.warn('Intelligent analysis failed, returning basic response:', intelligentError);
+    return basicResponse;
+  }
 };

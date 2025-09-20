@@ -38,11 +38,23 @@ const Index = () => {
     setResults(null);
 
     try {
+      console.log('Starting image comparison...', {
+        beforeImage: beforeImage.name,
+        afterImage: afterImage.name
+      });
+      
       const response = await compareImages(beforeImage, afterImage);
+      console.log('API Response received:', response);
+      
       setResults(response);
+      
+      // Handle both old and new response formats for toast message
+      const changeValue = response.overall_assessment?.total_area_changed_sq_km || response.change_percentage || 0;
+      const unit = response.overall_assessment ? 'km²' : '%';
+      
       toast({
         title: "Analysis Complete",
-        description: `Change detection completed. ${response.change_percentage.toFixed(2)}% change detected.`,
+        description: `Change detection completed. ${changeValue.toFixed(2)}${unit} change detected.`,
       });
     } catch (error) {
       console.error('Error comparing images:', error);

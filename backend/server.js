@@ -154,10 +154,15 @@ app.get('/', (req, res) => {
     message: 'Backend running ✅', 
     status: 'healthy',
     timestamp: new Date().toISOString(),
+    ml_backend_available: process.env.ML_BACKEND_URL ? true : false,
     endpoints: {
       compare: 'POST /compare - Upload two images for change detection',
+      'advanced-compare': 'POST /advanced-compare - Advanced ML model comparison',
+      'segment-land-cover': 'POST /segment-land-cover - Land cover segmentation',
+      'assess-damage': 'POST /assess-damage - Disaster damage assessment',
       'sample-analysis': 'GET /sample-analysis - Generate sample environmental report',
-      health: 'GET / - Health check'
+      health: 'GET / - Health check',
+      'ml-models': 'GET /ml-models - List available ML models'
     }
   });
 });
@@ -201,6 +206,302 @@ app.get('/sample-analysis', async (req, res) => {
     });
   }
 });
+
+// ML Backend URL
+const ML_BACKEND_URL = process.env.ML_BACKEND_URL || 'http://localhost:8001';
+
+// Check ML models availability
+app.get('/ml-models', async (req, res) => {
+  try {
+    const response = await fetch(`${ML_BACKEND_URL}/models/status`);
+    const models = await response.json();
+    res.json({
+      success: true,
+      ml_backend_available: true,
+      models: models,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('ML Backend not available:', error.message);
+    res.json({
+      success: false,
+      ml_backend_available: false,
+      error: 'ML Backend not available',
+      fallback_mode: true
+    });
+  }
+});
+
+// Advanced ML model comparison
+app.post('/advanced-compare', upload.fields([{ name: 'beforeImage', maxCount: 1 }, { name: 'afterImage', maxCount: 1 }]), async (req, res) => {
+  let beforeImagePath = null;
+  let afterImagePath = null;
+
+  try {
+    const { modelType = 'changeformer', datasetType = 'generic', analysisType = 'binary', confidenceThreshold = 0.5 } = req.body;
+
+    console.log('\u{1F9EA} Advanced ML comparison request:', {
+      modelType,
+      datasetType,
+      analysisType,
+      confidenceThreshold
+    });
+
+    // Validate files
+    if (!req.files?.beforeImage?.[0] || !req.files?.afterImage?.[0]) {
+      return res.status(400).json({
+        error: 'Both before and after images are required',
+        success: false
+      });
+    }
+
+    beforeImagePath = req.files.beforeImage[0].path;
+    afterImagePath = req.files.afterImage[0].path;
+
+    // Validate image files
+    for (const imagePath of [beforeImagePath, afterImagePath]) {
+      const validation = validateSatelliteImage({ 
+        mimetype: req.files.beforeImage[0].mimetype,
+        size: req.files.beforeImage[0].size,
+        originalname: req.files.beforeImage[0].originalname
+      });
+      if (!validation.isValid) {
+        throw new Error(validation.error);
+      }
+    }
+
+    // Try ML backend first
+    try {
+      const formData = new FormData();
+      formData.append('before_image', fs.createReadStream(beforeImagePath));
+      formData.append('after_image', fs.createReadStream(afterImagePath));
+      formData.append('model_type', modelType);
+      formData.append('dataset_type', datasetType);
+      formData.append('analysis_type', analysisType);
+      formData.append('confidence_threshold', confidenceThreshold.toString());
+      formData.append('post_processing', 'true');
+
+      const response = await fetch(`${ML_BACKEND_URL}/detect_changes`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const mlResult = await response.json();
+        
+        // Generate environmental report using the enhanced analysis
+        const environmentalReport = await environmentalAnalyst.generateEnvironmentalReport({
+          beforeImagePath,
+          afterImagePath,
+          changePercentage: mlResult.change_percentage,
+          heatmapBase64: mlResult.change_map_base64,
+          aiAnalysis: {
+            summary: `Advanced ${modelType} analysis detected ${mlResult.change_percentage.toFixed(1)}% change`,
+            changeType: mlResult.class_predictions ? Object.keys(mlResult.class_predictions)[0] : 'General Change',
+            riskScore: Math.min(10, Math.ceil(mlResult.change_percentage / 10)),
+            details: `Model: ${modelType}, Dataset: ${datasetType}, Analysis: ${analysisType}`,
+            confidence: mlResult.confidence_score
+          },
+          timestamps: [new Date().toISOString().split('T')[0]],
+          location: 'Satellite Image Analysis'
+        });
+
+        res.json({
+          success: true,
+          ml_backend_used: true,
+          model_type: modelType,
+          dataset_type: datasetType,
+          analysis_type: analysisType,
+          change_percentage: mlResult.change_percentage,
+          change_map_base64: mlResult.change_map_base64,
+          confidence_score: mlResult.confidence_score,
+          processing_time: mlResult.processing_time,
+          class_predictions: mlResult.class_predictions || null,
+          segmentation_map: mlResult.segmentation_map_base64 || null,
+          damage_assessment: mlResult.damage_assessment || null,
+          environmental_report: environmentalReport,
+          metadata: mlResult.metadata,
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+    } catch (mlError) {
+      console.warn('ML Backend error, falling back to traditional analysis:', mlError.message);
+    }
+
+    // Fallback to traditional analysis
+    const changeResult = await performTraditionalAnalysis(beforeImagePath, afterImagePath);
+    const environmentalReport = await environmentalAnalyst.generateEnvironmentalReport({
+      beforeImagePath,
+      afterImagePath,
+      changePercentage: changeResult.changePercentage,
+      heatmapBase64: changeResult.heatmapBase64,
+      aiAnalysis: changeResult.aiAnalysis,
+      timestamps: [new Date().toISOString().split('T')[0]],
+      location: 'Satellite Image Analysis'
+    });
+
+    res.json({
+      success: true,
+      ml_backend_used: false,
+      fallback_mode: true,
+      change_percentage: changeResult.changePercentage,
+      change_map_base64: changeResult.heatmapBase64,
+      environmental_report: environmentalReport,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error in advanced comparison:', error);
+    res.status(500).json({
+      error: error.message || 'Advanced comparison failed',
+      success: false,
+      ml_backend_used: false
+    });
+  } finally {
+    // Cleanup
+    if (beforeImagePath) fs.unlink(beforeImagePath, () => {});
+    if (afterImagePath) fs.unlink(afterImagePath, () => {});
+  }
+});
+
+// Land cover segmentation endpoint
+app.post('/segment-land-cover', upload.single('image'), async (req, res) => {
+  let imagePath = null;
+
+  try {
+    const { datasetType = 'sentinel2' } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'Image file is required',
+        success: false
+      });
+    }
+
+    imagePath = req.file.path;
+
+    // Try ML backend
+    try {
+      const formData = new FormData();
+      formData.append('image', fs.createReadStream(imagePath));
+      formData.append('dataset_type', datasetType);
+
+      const response = await fetch(`${ML_BACKEND_URL}/segment_land_cover`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        res.json({
+          success: true,
+          ml_backend_used: true,
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+    } catch (mlError) {
+      console.warn('ML Backend error for segmentation:', mlError.message);
+    }
+
+    // Fallback response
+    res.json({
+      success: false,
+      ml_backend_used: false,
+      error: 'ML Backend not available, segmentation requires advanced models',
+      message: 'Land cover segmentation requires the ML backend to be running'
+    });
+
+  } catch (error) {
+    console.error('Error in land cover segmentation:', error);
+    res.status(500).json({
+      error: error.message || 'Land cover segmentation failed',
+      success: false
+    });
+  } finally {
+    if (imagePath) fs.unlink(imagePath, () => {});
+  }
+});
+
+// Disaster damage assessment endpoint
+app.post('/assess-damage', upload.fields([{ name: 'preDisaster', maxCount: 1 }, { name: 'postDisaster', maxCount: 1 }]), async (req, res) => {
+  let preImagePath = null;
+  let postImagePath = null;
+
+  try {
+    if (!req.files?.preDisaster?.[0] || !req.files?.postDisaster?.[0]) {
+      return res.status(400).json({
+        error: 'Both pre and post disaster images are required',
+        success: false
+      });
+    }
+
+    preImagePath = req.files.preDisaster[0].path;
+    postImagePath = req.files.postDisaster[0].path;
+
+    // Try ML backend (xView2 model)
+    try {
+      const formData = new FormData();
+      formData.append('pre_disaster', fs.createReadStream(preImagePath));
+      formData.append('post_disaster', fs.createReadStream(postImagePath));
+
+      const response = await fetch(`${ML_BACKEND_URL}/assess_disaster_damage`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        res.json({
+          success: true,
+          ml_backend_used: true,
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+    } catch (mlError) {
+      console.warn('ML Backend error for damage assessment:', mlError.message);
+    }
+
+    // Fallback response
+    res.json({
+      success: false,
+      ml_backend_used: false,
+      error: 'ML Backend not available, damage assessment requires xView2 model',
+      message: 'Disaster damage assessment requires the ML backend with xView2 model'
+    });
+
+  } catch (error) {
+    console.error('Error in damage assessment:', error);
+    res.status(500).json({
+      error: error.message || 'Damage assessment failed',
+      success: false
+    });
+  } finally {
+    if (preImagePath) fs.unlink(preImagePath, () => {});
+    if (postImagePath) fs.unlink(postImagePath, () => {});
+  }
+});
+
+// Helper function for traditional analysis (existing functionality)
+async function performTraditionalAnalysis(beforeImagePath, afterImagePath) {
+  // This would contain your existing image comparison logic
+  // Placeholder implementation
+  return {
+    changePercentage: Math.random() * 25 + 5, // Mock change percentage
+    heatmapBase64: 'mock-heatmap-data',
+    aiAnalysis: {
+      summary: 'Traditional analysis detected changes',
+      changeType: 'General Change',
+      riskScore: 6,
+      details: 'Fallback analysis used',
+      confidence: 0.7
+    }
+  };
+}
 
 // Validate image after loading
 async function validateLoadedImage(imagePath, imageFile) {

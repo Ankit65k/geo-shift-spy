@@ -1,0 +1,58 @@
+# ML Backend Requirements for Geo Shift Spy
+# Advanced Change Detection and Segmentation Models
+
+# Core ML Libraries
+torch>=2.0.0
+torchvision>=0.15.0
+tensorflow>=2.13.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+pillow>=10.0.0
+scikit-image>=0.21.0
+scikit-learn>=1.3.0
+
+# Deep Learning for Remote Sensing
+segmentation-models-pytorch>=0.3.3
+timm>=0.9.0
+transformers>=4.35.0
+albumentations>=1.3.1
+
+# Geospatial Processing
+rasterio>=1.3.8
+geopandas>=0.13.2
+shapely>=2.0.1
+fiona>=1.9.0
+pyproj>=3.6.0
+earthengine-api>=0.1.370
+sentinel-hub>=3.9.0
+
+# Interactive Map Overlay Dependencies
+scikit-learn>=1.3.0  # For clustering
+lxml>=4.9.0  # For XML processing in KML generation
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.4.0
+python-multipart>=0.0.6
+
+# Image Processing & Analysis
+matplotlib>=3.7.2
+seaborn>=0.12.2
+tifffile>=2023.8.30
+h5py>=3.9.0
+
+# Utilities
+requests>=2.31.0
+tqdm>=4.66.0
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+aiofiles>=23.2.0
+
+# Model Specific
+# ChangeFormer dependencies
+einops>=0.7.0
+timm>=0.9.0
+
+# xView2 specific
+gdal>=3.7.0
